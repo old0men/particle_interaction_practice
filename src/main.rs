@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use bevy::color::palettes::basic::{BLUE, RED};
+use bevy::color::palettes::basic::{BLUE, GREEN, RED};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use rand::Rng;
@@ -45,6 +45,7 @@ fn clear_terminal() {
 
 fn game_loop (
     mut query: Query<(&mut Particle, &mut Transform)>,
+    mut gizmos: Gizmos
 ) {
     let mut combinations = query.iter_combinations_mut();
     while let Some([mut particle1, mut particle2]) = combinations.fetch_next() {
@@ -62,7 +63,7 @@ fn game_loop (
 
             match particle1.attractions.get(particle2.color.as_str()) {
                 Some(force) => {
-                    if distance.abs() <= 10.0 {
+                    if distance.abs() <= 15.0 {
                         centeral_force1 = -(*force-1.2);
                     } else {
                         if  *force == 0.00005 {
@@ -77,7 +78,7 @@ fn game_loop (
                     // second particle get the attraction force equal at the position of the first particle
             match particle2.attractions.get(particle1.color.as_str()) {
                 Some(force) => {
-                    if distance.abs() <= 10.0 {
+                    if distance.abs() <= 15.0 {
                         centeral_force2 = -(*force-1.2);
 
                     } else {
@@ -93,6 +94,36 @@ fn game_loop (
 
             particle1.total_force += (centeral_force1 / (distance*distance)) * direction;
             particle2.total_force -= (centeral_force2 / (distance*distance)) * direction;
+
+            if particle1.color == "red"{
+                if centeral_force1 > 0.0 {
+                    gizmos.line_2d(
+                        Vec2::new(translation1.translation.x, translation1.translation.y),
+                        Vec2::new(translation2.translation.x, translation2.translation.y),
+                        GREY
+                    )
+                } else if centeral_force1 < 0.0 {
+                    gizmos.line_2d(
+                        Vec2::new(translation1.translation.x, translation1.translation.y),
+                        Vec2::new(translation2.translation.x, translation2.translation.y),
+                        GREEN
+                    )
+                }
+            } else if particle2.color == "red"{
+                if centeral_force2 > 0.0 {
+                    gizmos.line_2d(
+                        Vec2::new(translation1.translation.x, translation1.translation.y),
+                        Vec2::new(translation2.translation.x, translation2.translation.y),
+                        GREY
+                    )
+                } else if centeral_force2 < 0.0 {
+                    gizmos.line_2d(
+                        Vec2::new(translation1.translation.x, translation1.translation.y),
+                        Vec2::new(translation2.translation.x, translation2.translation.y),
+                        GREEN
+                    )
+                }
+            }
         }
     }
 
@@ -101,7 +132,7 @@ fn game_loop (
         if particle.color == "red" {
             particle.velocity = (particle.velocity + particle.total_force) * 0.996;
         } else {
-            particle.velocity = (particle.velocity + particle.total_force) * 0.994;
+            particle.velocity = (particle.velocity + particle.total_force) * 0.993;
         }
         translation.translation += Vec3::new(particle.velocity.x, particle.velocity.y, 0.0);
         particle.total_force = Vec2::ZERO;
@@ -110,11 +141,11 @@ fn game_loop (
 
 fn wave_function(distance: f32, opening: f32) -> f32 {
     let wave_size:f32 = 4.0;
-    let wave_frequency = 0.4;
+    let wave_frequency = 0.1;
     let left = opening*(distance.powf(2.0));
     let right_cos = (wave_frequency*distance).cos();
     let right = wave_size*(right_cos.powf(11.0));
-    left + right - 0.2
+    left + right - 0.6
 }
 
 fn spawn_entitys(
@@ -128,7 +159,7 @@ fn spawn_entitys(
     let attract = -0.333;
 
     let neutral = 0.0;
-    let function_wave = 0.00005;
+    let function_wave = 0.00002;
     let max_rep = 1.0; //for same particle (P/E)
 
     let mut proton:HashMap<String, f32> = HashMap::new();
@@ -137,7 +168,7 @@ fn spawn_entitys(
     proton.insert("grey".parse().unwrap(), attract);
 
      let mut electron:HashMap<String, f32> = HashMap::new();
-    electron.insert("blue".parse().unwrap(), function_wave);
+    electron.insert("blue".parse().unwrap(), attract);
     electron.insert("red".parse().unwrap(), max_rep);
     electron.insert("grey".parse().unwrap(), neutral);
 
@@ -154,7 +185,7 @@ fn spawn_entitys(
 
 
 
-    for _ in 1..40 {
+    for _ in 1..10{
 
 
         let random_vector1: Vec2 = Vec2::new(rng.random_range(-300.0..300.0), rng.random_range(-300.0..300.0));
