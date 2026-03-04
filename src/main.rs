@@ -3,6 +3,7 @@ use bevy::color::palettes::basic::{BLUE, GREEN, RED};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use rand::Rng;
+use either::Either;
 
 const GREY: Srgba = Srgba::new(0.5, 0.5, 0.5, 1.0);
 
@@ -14,6 +15,7 @@ struct Particle {
     color: String,
     total_force: Vec2,
     attractions: HashMap<String, f32>,
+    range: f32,
 }
 
 struct Screen {
@@ -30,6 +32,7 @@ fn main() {
         .add_systems(Startup, (spawn_camera, spawn_entitys))
         .add_systems(Update, (game_loop,
                               border_system,
+                              position_update,
                               clear_terminal).chain())
         .run();
 }
@@ -54,22 +57,24 @@ fn game_loop (
         let (mut particle2, mut translation2) = (particle2.0, particle2.1);
         let distance = translation1.translation.distance(translation2.translation);
 
-        if distance.abs() <= 400.0 {
+        if distance.abs() <= 700.0 {
 
             let direction = Vec2::new(translation1.translation.x - translation2.translation.x, translation1.translation.y - translation2.translation.y).normalize();
 
-            let mut centeral_force1 = 0.0;
-            let mut centeral_force2 = 0.0;
+            let mut central_force1 = 0.0;
+            let mut central_force2 = 0.0;
 
             match particle1.attractions.get(particle2.color.as_str()) {
                 Some(force) => {
-                    if distance.abs() <= 15.0 {
-                        centeral_force1 = -(*force-1.2);
-                    } else {
-                        if  *force == 0.00005 {
-                            centeral_force1 = wave_function(distance, *force);
+                    if distance.abs() <= particle1.range {
+                        if distance.abs() <= 20.0 {
+                            if *force == 0.0 {
+                                central_force1 = 18.0;
+                            } else {
+                                central_force1 = (*force*2.0).abs();
+                            }
                         } else {
-                            centeral_force1 = *force
+                            central_force1 = *force;
                         }
                     }
                 }
@@ -78,74 +83,36 @@ fn game_loop (
                     // second particle get the attraction force equal at the position of the first particle
             match particle2.attractions.get(particle1.color.as_str()) {
                 Some(force) => {
-                    if distance.abs() <= 15.0 {
-                        centeral_force2 = -(*force-1.2);
-
-                    } else {
-                        if *force == 0.00005 {
-                            centeral_force2 = wave_function(distance, *force);
+                    if distance.abs() <= particle2.range {
+                        if distance.abs() <= 25.0 {
+                            if *force == 0.0 {
+                                central_force2 = 18.0;
+                            } else {
+                                central_force2 = (*force*2.0).abs();
+                            }
                         } else {
-                            centeral_force2 = *force
+                            central_force2 = *force
                         }
                     }
                 }
                 None => {}
             }
 
-            particle1.total_force += (centeral_force1 / (distance*distance)) * direction;
-            particle2.total_force -= (centeral_force2 / (distance*distance)) * direction;
-
-            if particle1.color == "red"{
-                if centeral_force1 > 0.0 {
-                    gizmos.line_2d(
-                        Vec2::new(translation1.translation.x, translation1.translation.y),
-                        Vec2::new(translation2.translation.x, translation2.translation.y),
-                        GREY
-                    )
-                } else if centeral_force1 < 0.0 {
-                    gizmos.line_2d(
-                        Vec2::new(translation1.translation.x, translation1.translation.y),
-                        Vec2::new(translation2.translation.x, translation2.translation.y),
-                        GREEN
-                    )
-                }
-            } else if particle2.color == "red"{
-                if centeral_force2 > 0.0 {
-                    gizmos.line_2d(
-                        Vec2::new(translation1.translation.x, translation1.translation.y),
-                        Vec2::new(translation2.translation.x, translation2.translation.y),
-                        GREY
-                    )
-                } else if centeral_force2 < 0.0 {
-                    gizmos.line_2d(
-                        Vec2::new(translation1.translation.x, translation1.translation.y),
-                        Vec2::new(translation2.translation.x, translation2.translation.y),
-                        GREEN
-                    )
-                }
-            }
+            particle1.total_force += (central_force1 / (distance*distance)) * direction;
+            particle2.total_force -= (central_force2 / (distance*distance)) * direction;
         }
-    }
-
-    for (mut particle, mut translation) in query.iter_mut() {
-
-        if particle.color == "red" {
-            particle.velocity = (particle.velocity + particle.total_force) * 0.996;
-        } else {
-            particle.velocity = (particle.velocity + particle.total_force) * 0.993;
-        }
-        translation.translation += Vec3::new(particle.velocity.x, particle.velocity.y, 0.0);
-        particle.total_force = Vec2::ZERO;
     }
 }
 
-fn wave_function(distance: f32, opening: f32) -> f32 {
-    let wave_size:f32 = 4.0;
-    let wave_frequency = 0.1;
-    let left = opening*(distance.powf(2.0));
-    let right_cos = (wave_frequency*distance).cos();
-    let right = wave_size*(right_cos.powf(11.0));
-    left + right - 0.6
+
+fn position_update(mut query: Query<(&mut Particle, &mut Transform)>){
+    for (mut particle, mut translation) in query.iter_mut() {
+
+        particle.velocity = (particle.velocity + particle.total_force) * 0.9;
+
+        translation.translation += Vec3::new(particle.velocity.x, particle.velocity.y, 0.0);
+        particle.total_force = Vec2::ZERO;
+    }
 }
 
 fn spawn_entitys(
@@ -155,28 +122,25 @@ fn spawn_entitys(
 ) {
     let mut rng = rand::rng();
 
-
-    let attract = -0.333;
-
+    let repel = 10.0;
     let neutral = 0.0;
-    let function_wave = 0.00002;
-    let max_rep = 1.0; //for same particle (P/E)
+    let attract = -10.0;
 
     let mut proton:HashMap<String, f32> = HashMap::new();
-    proton.insert("blue".parse().unwrap(), max_rep);
-    proton.insert("red".parse().unwrap(), function_wave);
-    proton.insert("grey".parse().unwrap(), attract);
+    proton.insert("blue".parse().unwrap(), repel+60.0); //a+10.0
+    proton.insert("red".parse().unwrap(),  attract); //a
+    proton.insert("grey".parse().unwrap(), attract-20.0); //n
 
-     let mut electron:HashMap<String, f32> = HashMap::new();
-    electron.insert("blue".parse().unwrap(), attract);
-    electron.insert("red".parse().unwrap(), max_rep);
-    electron.insert("grey".parse().unwrap(), neutral);
+    let mut electron:HashMap<String, f32> = HashMap::new();
+    electron.insert("blue".parse().unwrap(), attract-5.0); //r
+    electron.insert("red".parse().unwrap(),  repel+15.0); //a
+    electron.insert("grey".parse().unwrap(), neutral); //r
 
 
-     let mut neutron:HashMap<String, f32> = HashMap::new();
-    neutron.insert("blue".parse().unwrap(), attract-0.5);
-    neutron.insert("red".parse().unwrap(), neutral);
-    neutron.insert("grey".parse().unwrap(), attract+0.3);
+    let mut neutron:HashMap<String, f32> = HashMap::new();
+    neutron.insert("blue".parse().unwrap(), attract-60.0); // a
+    neutron.insert("red".parse().unwrap(),  neutral); // n
+    neutron.insert("grey".parse().unwrap(), attract-20.0); //a+10.0
     
     println!("blue: {:?}", proton);
     println!("red: {:?}", electron);
@@ -185,13 +149,12 @@ fn spawn_entitys(
 
 
 
-    for _ in 1..10{
+    for _ in 1..150 {
+        let range = -300.0..300.0;
 
-
-        let random_vector1: Vec2 = Vec2::new(rng.random_range(-300.0..300.0), rng.random_range(-300.0..300.0));
-        let random_vector2: Vec2 = Vec2::new(rng.random_range(-300.0..300.0), rng.random_range(-300.0..300.0));
-        let random_vector3: Vec2 = Vec2::new(rng.random_range(-300.0..300.0), rng.random_range(-300.0..300.0));
-
+        let random_vector1: Vec2 = Vec2::new(rng.random_range(range.clone()), rng.random_range(range.clone()));
+        let random_vector2: Vec2 = Vec2::new(rng.random_range(range.clone()), rng.random_range(range.clone()));
+        let random_vector3: Vec2 = Vec2::new(rng.random_range(range.clone()), rng.random_range(range.clone()));
 
         commands.spawn ((
             Particle {
@@ -200,13 +163,13 @@ fn spawn_entitys(
                 color: "blue".to_string(),
                 total_force: Vec2::ZERO,
                 attractions: proton.clone(),
+                range: 700.0
             },
             Mesh2d(meshes.add(Circle::default())),
             MeshMaterial2d(materials.add(Color::from(BLUE))),
             Transform::from_xyz(random_vector1.x, random_vector1.y, 0.0)
                 .with_scale(Vec3::splat(10.0)),
         ));
-
 
 
 
@@ -217,6 +180,7 @@ fn spawn_entitys(
                 color: "grey".to_string(),
                 total_force: Vec2::ZERO,
                 attractions: neutron.clone(),
+                range: 40.0
             },
             Mesh2d(meshes.add(Circle::default())),
             MeshMaterial2d(materials.add(Color::from(GREY))),
@@ -225,6 +189,8 @@ fn spawn_entitys(
         ));
 
 
+ /*
+
         commands.spawn ((
             Particle {
                 position: random_vector3,
@@ -232,6 +198,7 @@ fn spawn_entitys(
                 color: "red".to_string(),
                 attractions: electron.clone(),
                 total_force: Vec2::ZERO,
+                range: 700.0
             },
             Mesh2d(meshes.add(Circle::default())),
             MeshMaterial2d(materials.add(Color::from(RED))),
@@ -239,6 +206,7 @@ fn spawn_entitys(
                 .with_scale(Vec3::splat(8.0)),
         ));
 
+  */
     }
 }
 
@@ -248,25 +216,23 @@ fn border_system(
 ){
     let screen = check_screen(*q_windows);
     for (mut transform, mut particle ) in query.iter_mut() {
-        if transform.translation.x.abs() >= screen.width {
+        if transform.translation.x.abs() >= screen.width-5.0 {
             //println!("pos:{:?}, width:{:?}", transform.translation.x.abs(), screen.width);
-            /*
-            if transform.translation.x.abs() >= screen.width + 5.0{
-                transform.translation.x = screen.width.copysign(transform.translation.x) + 40.0_f32.copysign(-transform.translation.x)
+
+            if transform.translation.x.abs() >= screen.width {
+                transform.translation.x = screen.width.copysign(transform.translation.x);
             }
 
-             */
-            transform.translation.x *= -1.0
+            particle.velocity.x *= -1.0
         }
-        if transform.translation.y.abs() >= screen.height {
+        if transform.translation.y.abs() >= screen.height-5.0 {
             //println!("pos:{:?}, height:{:?}", transform.translation.y, screen.height);
-            /*
-            if transform.translation.y.abs() >= screen.height + 5.0{
-                transform.translation.y = screen.height.copysign(transform.translation.y) + 40.0_f32.copysign(-transform.translation.y)
+
+            if transform.translation.y.abs() >= screen.height{
+                transform.translation.y = screen.height.copysign(transform.translation.y);
             }
 
-             */
-            transform.translation.y *= -1.0
+            particle.velocity.y *= -1.0
         }
     }
 }

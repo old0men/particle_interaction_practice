@@ -3316,9 +3316,10 @@ checksum = "3eb8486b569e12e2c32ad3e204dbaba5e4b5b216e9367044f25f1dba42341773"
 
 [[package]]
 name = "quick_life_game_practice"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "bevy",
+ "either",
  "rand 0.9.2",
 ]
 
