@@ -3,7 +3,7 @@ use bevy::color::palettes::basic::{BLUE, GREEN, RED};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use rand::Rng;
-use either::Either;
+use bevy_screen_diagnostics::{ScreenDiagnosticsPlugin, ScreenFrameDiagnosticsPlugin};
 
 const GREY: Srgba = Srgba::new(0.5, 0.5, 0.5, 1.0);
 
@@ -29,12 +29,15 @@ impl Screen {
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_systems(Startup, (spawn_camera, spawn_entitys))
-        .add_systems(Update, (game_loop,
+        .add_plugins(ScreenDiagnosticsPlugin::default())
+        .add_plugins(ScreenFrameDiagnosticsPlugin)
+        .add_systems(Startup, (spawn_camera, spawn_entities))
+        .add_systems(Update,
+                     (game_loop,
                               border_system,
-                              position_update,
-                              clear_terminal).chain())
-        .run();
+                              movement_system_parallelisation,
+                              clear_terminal)
+        ).run();
 }
 
 fn spawn_camera(mut commands: Commands) {
@@ -47,17 +50,16 @@ fn clear_terminal() {
 
 
 fn game_loop (
-    mut query: Query<(&mut Particle, &mut Transform)>,
-    mut gizmos: Gizmos
+    mut query: Query<(&mut Particle, &mut Transform)>
 ) {
     let mut combinations = query.iter_combinations_mut();
     while let Some([mut particle1, mut particle2]) = combinations.fetch_next() {
 
         let (mut particle1, mut translation1) = (particle1.0, particle1.1);
         let (mut particle2, mut translation2) = (particle2.0, particle2.1);
-        let distance = translation1.translation.distance(translation2.translation);
+        let distance = translation1.translation.distance(translation2.translation).abs();
 
-        if distance.abs() <= 700.0 {
+        if distance <= 700.0 {
 
             let direction = Vec2::new(translation1.translation.x - translation2.translation.x, translation1.translation.y - translation2.translation.y).normalize();
 
@@ -66,12 +68,12 @@ fn game_loop (
 
             match particle1.attractions.get(particle2.color.as_str()) {
                 Some(force) => {
-                    if distance.abs() <= particle1.range {
-                        if distance.abs() <= 20.0 {
-                            if *force == 0.0 {
-                                central_force1 = 18.0;
-                            } else {
+                    if distance <= particle1.range {
+                        if distance <= 20.0 {
+                            if *force != 0.0 {
                                 central_force1 = (*force*2.0).abs();
+                            } else {
+                                central_force1 = 18.0;
                             }
                         } else {
                             central_force1 = *force;
@@ -83,12 +85,12 @@ fn game_loop (
                     // second particle get the attraction force equal at the position of the first particle
             match particle2.attractions.get(particle1.color.as_str()) {
                 Some(force) => {
-                    if distance.abs() <= particle2.range {
-                        if distance.abs() <= 25.0 {
-                            if *force == 0.0 {
-                                central_force2 = 18.0;
-                            } else {
+                    if distance <= particle2.range {
+                        if distance <= 20.0 {
+                            if *force != 0.0 {
                                 central_force2 = (*force*2.0).abs();
+                            } else {
+                                central_force2 = 18.0;
                             }
                         } else {
                             central_force2 = *force
@@ -115,7 +117,16 @@ fn position_update(mut query: Query<(&mut Particle, &mut Transform)>){
     }
 }
 
-fn spawn_entitys(
+fn movement_system_parallelisation(mut query: Query<(&mut Transform, &mut Particle)>) {
+    query.par_iter_mut().for_each(|(mut transform, mut particle)| {
+        particle.velocity = (particle.velocity + particle.total_force) * 0.9;
+
+        transform.translation += Vec3::new(particle.velocity.x, particle.velocity.y, 0.0);
+        particle.total_force = Vec2::ZERO;
+    });
+}
+
+fn spawn_entities(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
@@ -127,29 +138,26 @@ fn spawn_entitys(
     let attract = -10.0;
 
     let mut proton:HashMap<String, f32> = HashMap::new();
-    proton.insert("blue".parse().unwrap(), repel+60.0); //a+10.0
+    proton.insert("blue".parse().unwrap(), repel+60.0); // repel+60.0
     proton.insert("red".parse().unwrap(),  attract); //a
-    proton.insert("grey".parse().unwrap(), attract-20.0); //n
+    proton.insert("grey".parse().unwrap(), attract-20.0); //attract-20.0
 
     let mut electron:HashMap<String, f32> = HashMap::new();
-    electron.insert("blue".parse().unwrap(), attract-5.0); //r
-    electron.insert("red".parse().unwrap(),  repel+15.0); //a
-    electron.insert("grey".parse().unwrap(), neutral); //r
-
+    electron.insert("blue".parse().unwrap(), attract-30.0); //attract-30.0
+    electron.insert("red".parse().unwrap(),  repel+15.0); //repel+15.0
+    electron.insert("grey".parse().unwrap(), neutral); //neutral
 
     let mut neutron:HashMap<String, f32> = HashMap::new();
-    neutron.insert("blue".parse().unwrap(), attract-60.0); // a
+    neutron.insert("blue".parse().unwrap(), attract-100.0); //a-100.0
     neutron.insert("red".parse().unwrap(),  neutral); // n
-    neutron.insert("grey".parse().unwrap(), attract-20.0); //a+10.0
+    neutron.insert("grey".parse().unwrap(), attract-40.0); //a-20.0
     
     println!("blue: {:?}", proton);
     println!("red: {:?}", electron);
     println!("grey: {:?}", neutron);
 
 
-
-
-    for _ in 1..150 {
+    for _ in 1..300 {
         let range = -300.0..300.0;
 
         let random_vector1: Vec2 = Vec2::new(rng.random_range(range.clone()), rng.random_range(range.clone()));
@@ -171,8 +179,6 @@ fn spawn_entitys(
                 .with_scale(Vec3::splat(10.0)),
         ));
 
-
-
         commands.spawn ((
             Particle {
                 position: random_vector2,
@@ -180,16 +186,13 @@ fn spawn_entitys(
                 color: "grey".to_string(),
                 total_force: Vec2::ZERO,
                 attractions: neutron.clone(),
-                range: 40.0
+                range: 40.0 //40.0
             },
             Mesh2d(meshes.add(Circle::default())),
             MeshMaterial2d(materials.add(Color::from(GREY))),
             Transform::from_xyz(random_vector2.x, random_vector2.y, 0.0)
                 .with_scale(Vec3::splat(10.0)),
         ));
-
-
- /*
 
         commands.spawn ((
             Particle {
@@ -205,8 +208,6 @@ fn spawn_entitys(
             Transform::from_xyz(random_vector3.x, random_vector3.y, 0.0)
                 .with_scale(Vec3::splat(8.0)),
         ));
-
-  */
     }
 }
 
