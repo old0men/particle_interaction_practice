@@ -25,6 +25,16 @@ struct Screen {
 impl Screen {
     fn new(width: f32, height: f32) -> Self { Screen { width, height } }
 }
+trait IntoVec2 {
+    fn into_vec2(&mut self) -> Vec2 {Vec2::ZERO}
+}
+
+impl IntoVec2 for Vec3  {
+    fn into_vec2(&mut self) -> Vec2{
+        Vec2::new(self.x, self.y)
+    }
+}
+
 
 fn main() {
     App::new()
@@ -53,15 +63,16 @@ fn game_loop (
     mut query: Query<(&mut Particle, &mut Transform)>
 ) {
     let mut combinations = query.iter_combinations_mut();
-    while let Some([mut particle1, mut particle2]) = combinations.fetch_next() {
+    while let Some([particle1, particle2]) = combinations.fetch_next() {
 
-        let (mut particle1, mut translation1) = (particle1.0, particle1.1);
-        let (mut particle2, mut translation2) = (particle2.0, particle2.1);
-        let distance = translation1.translation.distance(translation2.translation).abs();
+        let (mut particle1, translation1) = (particle1.0, particle1.1);
+        let (mut particle2, translation2) = (particle2.0, particle2.1);
+        let delta:Vec2 = (translation1.translation - translation2.translation).into_vec2();
+        let distance = delta.length_squared();
 
-        if distance <= 700.0 {
+        if distance <= 700.0*700.0 {
 
-            let direction = Vec2::new(translation1.translation.x - translation2.translation.x, translation1.translation.y - translation2.translation.y).normalize();
+            let direction = delta.normalize();
 
             let mut central_force1 = 0.0;
             let mut central_force2 = 0.0;
