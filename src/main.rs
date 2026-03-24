@@ -1,22 +1,39 @@
 use std::collections::HashMap;
 use bevy::color::palettes::basic::{BLUE, GREEN, RED};
 use bevy::prelude::*;
+use bevy::reflect::Array;
 use bevy::window::PrimaryWindow;
 use rand::Rng;
 use bevy_screen_diagnostics::{ScreenDiagnosticsPlugin, ScreenFrameDiagnosticsPlugin};
 
 const GREY: Srgba = Srgba::new(0.5, 0.5, 0.5, 1.0);
 
-
-#[derive(Component, Default)]
+#[derive(Debug)]
+enum Attractions{
+    Blue(f32),
+    Red(f32),
+    Grey(f32)
+}
+#[derive(Component)]
 struct Particle {
-    position: Vec2,
-    velocity: Vec2,
-    color: String,
-    total_force: Vec2,
-    attractions: HashMap<String, f32>,
+    color: usize,
+    attractions: [Attractions; 3],
     range: f32,
 }
+
+#[derive(Component, Default)]
+struct Position {
+    position: Vec2,
+}
+#[derive(Component, Default)]
+struct Velocity{
+    velocity: Vec2
+}
+#[derive(Component, Default)]
+struct TotalForce {
+    total_force: Vec2,
+}
+
 
 struct Screen {
     width: f32,
@@ -25,16 +42,6 @@ struct Screen {
 impl Screen {
     fn new(width: f32, height: f32) -> Self { Screen { width, height } }
 }
-trait IntoVec2 {
-    fn into_vec2(&mut self) -> Vec2 {Vec2::ZERO}
-}
-
-impl IntoVec2 for Vec3  {
-    fn into_vec2(&mut self) -> Vec2{
-        Vec2::new(self.x, self.y)
-    }
-}
-
 
 fn main() {
     App::new()
@@ -58,72 +65,84 @@ fn clear_terminal() {
     print!("\x1B[2J\x1B[1;1H");
 }
 
+fn calculate_total_force (distance: f32, range: f32, force: f32) -> f32 {
+    if distance <= range*range {
+        if distance <= 20.0 * 20.0 {
+            if force != 0.0 {
+                (force * 2.0).abs()
+            } else {
+                18.0
+            }
+        } else {
+            force
+        }
+    } else {
+        0.0
+    }
+}
+
 
 fn game_loop (
-    mut query: Query<(&mut Particle, &mut Transform)>
+    mut query: Query<(&Particle, &Position, &mut TotalForce)>
 ) {
     let mut combinations = query.iter_combinations_mut();
     while let Some([particle1, particle2]) = combinations.fetch_next() {
 
-        let (mut particle1, translation1) = (particle1.0, particle1.1);
-        let (mut particle2, translation2) = (particle2.0, particle2.1);
-        let delta:Vec2 = (translation1.translation - translation2.translation).into_vec2();
+        let (particle1, position1, mut total_force1) = (particle1.0, particle1.1, particle1.2);
+        let (particle2, position2, mut total_force2) = (particle2.0, particle2.1, particle2.2);
+        let delta:Vec2 = position1.position - position2.position;
         let distance = delta.length_squared();
 
         if distance <= 700.0*700.0 {
 
             let direction = delta.normalize();
 
-            let mut central_force1 = 0.0;
-            let mut central_force2 = 0.0;
+            let force1 = &particle1.attractions[particle2.color];
+            let force2 = &particle2.attractions[particle1.color];
 
-            match particle1.attractions.get(particle2.color.as_str()) {
-                Some(force) => {
-                    if distance <= particle1.range*particle1.range {
-                        if distance <= 20.0*20.0 {
-                            if *force != 0.0 {
-                                central_force1 = (*force*2.0).abs();
-                            } else {
-                                central_force1 = 18.0;
-                            }
-                        } else {
-                            central_force1 = *force;
-                        }
-                    }
+            let central_force1 = match force1 {
+                Attractions::Blue(force) => {
+                    calculate_total_force(distance, particle1.range, *force)
+                },
+                Attractions::Grey(force) => {
+                    calculate_total_force(distance, particle1.range, *force)
+                },
+                Attractions::Red(force) => {
+                    calculate_total_force(distance, particle1.range, *force)
                 }
-                None => {}
-            }
-                    // second particle get the attraction force equal at the position of the first particle
-            match particle2.attractions.get(particle1.color.as_str()) {
-                Some(force) => {
-                    if distance <= particle2.range*particle2.range {
-                        if distance <= 20.0*20.0 {
-                            if *force != 0.0 {
-                                central_force2 = (*force*2.0).abs();
-                            } else {
-                                central_force2 = 18.0;
-                            }
-                        } else {
-                            central_force2 = *force
-                        }
-                    }
-                }
-                None => {}
-            }
+            };
 
-            particle1.total_force += (central_force1 / (distance)) * direction;
-            particle2.total_force -= (central_force2 / (distance)) * direction;
+            let central_force2:f32 = match force2 {
+                Attractions::Blue(force) => {
+                    calculate_total_force(distance, particle2.range, *force)
+                },
+                Attractions::Grey(force) => {
+                    calculate_total_force(distance, particle2.range, *force)
+                },
+                Attractions::Red(force) => {
+                    calculate_total_force(distance, particle2.range, *force)
+                }
+            };
+
+            total_force1.total_force += (central_force1 / (distance)) * direction;
+            total_force2.total_force -= (central_force2 / (distance)) * direction;
         }
     }
 }
 
 
-fn movement_system_parallelisation(mut query: Query<(&mut Transform, &mut Particle)>) {
-    query.par_iter_mut().for_each(|(mut transform, mut particle)| {
-        particle.velocity = (particle.velocity + particle.total_force) * 0.9;
-
-        transform.translation += Vec3::new(particle.velocity.x, particle.velocity.y, 0.0);
-        particle.total_force = Vec2::ZERO;
+fn movement_system_parallelisation(mut query: Query<(&mut Transform, &mut Position, &mut Velocity, &mut TotalForce)>) {
+    query.par_iter_mut().for_each(|(mut transform, mut position, mut velocity, mut total_force)| {
+        //calculate change
+        velocity.velocity = (velocity.velocity + total_force.total_force) * 0.9;
+        //animate change
+        transform.translation.x += velocity.velocity.x;
+        transform.translation.y += velocity.velocity.y;
+        //save change
+        position.position.x = transform.translation.x;
+        position.position.y = transform.translation.y;
+        //reset
+        total_force.total_force = Vec2::ZERO;
     });
 }
 
@@ -138,27 +157,7 @@ fn spawn_entities(
     let neutral = 0.0;
     let attract = -10.0;
 
-    let mut proton:HashMap<String, f32> = HashMap::new();
-    proton.insert("blue".parse().unwrap(), repel+60.0); // repel+60.0
-    proton.insert("red".parse().unwrap(),  attract); //a
-    proton.insert("grey".parse().unwrap(), attract-20.0); //attract-20.0
-
-    let mut electron:HashMap<String, f32> = HashMap::new();
-    electron.insert("blue".parse().unwrap(), attract-30.0); //attract-30.0
-    electron.insert("red".parse().unwrap(),  repel+15.0); //repel+15.0
-    electron.insert("grey".parse().unwrap(), neutral); //neutral
-
-    let mut neutron:HashMap<String, f32> = HashMap::new();
-    neutron.insert("blue".parse().unwrap(), attract-100.0); //a-100.0
-    neutron.insert("red".parse().unwrap(),  neutral); // n
-    neutron.insert("grey".parse().unwrap(), attract-40.0); //a-20.0
-    
-    println!("blue: {:?}", proton);
-    println!("red: {:?}", electron);
-    println!("grey: {:?}", neutron);
-
-
-    for _ in 1..50 {
+    for _ in 1..100 {
         let range = -300.0..300.0;
 
         let random_vector1: Vec2 = Vec2::new(rng.random_range(range.clone()), rng.random_range(range.clone()));
@@ -167,12 +166,22 @@ fn spawn_entities(
 
         commands.spawn ((
             Particle {
-                position: random_vector1,
-                velocity: Vec2::ZERO,
-                color: "blue".to_string(),
-                total_force: Vec2::ZERO,
-                attractions: proton.clone(),
+                color: 0,
+                attractions: [
+                    Attractions::Blue(attract+60.0),
+                    Attractions::Red(attract),
+                    Attractions::Grey(attract-20.0)
+                ],
                 range: 700.0
+            },
+            Position {
+                position: random_vector1
+            },
+            Velocity {
+                velocity: Vec2::ZERO
+            },
+            TotalForce {
+                total_force: Vec2::ZERO
             },
             Mesh2d(meshes.add(Circle::default())),
             MeshMaterial2d(materials.add(Color::from(BLUE))),
@@ -182,12 +191,22 @@ fn spawn_entities(
 
         commands.spawn ((
             Particle {
-                position: random_vector2,
-                velocity: Vec2::ZERO,
-                color: "grey".to_string(),
-                total_force: Vec2::ZERO,
-                attractions: neutron.clone(),
+                color: 1,
+                attractions: [
+                    Attractions::Blue(attract-100.0),
+                    Attractions::Red(neutral),
+                    Attractions::Grey(attract-40.0),
+                ],
                 range: 40.0 //40.0
+            },
+            Position {
+                position: random_vector2
+            },
+            Velocity {
+                velocity: Vec2::ZERO
+            },
+            TotalForce {
+                total_force: Vec2::ZERO
             },
             Mesh2d(meshes.add(Circle::default())),
             MeshMaterial2d(materials.add(Color::from(GREY))),
@@ -197,12 +216,22 @@ fn spawn_entities(
 
         commands.spawn ((
             Particle {
-                position: random_vector3,
-                velocity: Vec2::ZERO,
-                color: "red".to_string(),
-                attractions: electron.clone(),
-                total_force: Vec2::ZERO,
+                color: 2,
+                attractions: [
+                    Attractions::Blue(attract-30.0),
+                    Attractions::Red(repel+15.0),
+                    Attractions::Grey(neutral)
+                ],
                 range: 700.0
+            },
+            Position {
+                position: random_vector3
+            },
+            Velocity {
+                velocity: Vec2::ZERO
+            },
+            TotalForce {
+                total_force: Vec2::ZERO
             },
             Mesh2d(meshes.add(Circle::default())),
             MeshMaterial2d(materials.add(Color::from(RED))),
@@ -214,10 +243,10 @@ fn spawn_entities(
 
 fn border_system(
     q_windows: Single<&Window, With<PrimaryWindow>>,
-    mut query: Query<(&mut Transform, &mut Particle)>
+    mut query: Query<(&mut Transform, &mut Velocity)>
 ){
     let screen = check_screen(*q_windows);
-    for (mut transform, mut particle ) in query.iter_mut() {
+    for (mut transform, mut velocity ) in query.iter_mut() {
         if transform.translation.x.abs() >= screen.width-5.0 {
             //println!("pos:{:?}, width:{:?}", transform.translation.x.abs(), screen.width);
 
@@ -225,7 +254,7 @@ fn border_system(
                 transform.translation.x = screen.width.copysign(transform.translation.x);
             }
 
-            particle.velocity.x *= -1.0
+            velocity.velocity.x *= -1.0
         }
         if transform.translation.y.abs() >= screen.height-5.0 {
             //println!("pos:{:?}, height:{:?}", transform.translation.y, screen.height);
@@ -234,7 +263,7 @@ fn border_system(
                 transform.translation.y = screen.height.copysign(transform.translation.y);
             }
 
-            particle.velocity.y *= -1.0
+            velocity.velocity.y *= -1.0
         }
     }
 }
