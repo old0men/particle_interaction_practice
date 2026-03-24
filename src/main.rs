@@ -79,8 +79,8 @@ fn game_loop (
 
             match particle1.attractions.get(particle2.color.as_str()) {
                 Some(force) => {
-                    if distance <= particle1.range {
-                        if distance <= 20.0 {
+                    if distance <= particle1.range*particle1.range {
+                        if distance <= 20.0*20.0 {
                             if *force != 0.0 {
                                 central_force1 = (*force*2.0).abs();
                             } else {
@@ -96,8 +96,8 @@ fn game_loop (
                     // second particle get the attraction force equal at the position of the first particle
             match particle2.attractions.get(particle1.color.as_str()) {
                 Some(force) => {
-                    if distance <= particle2.range {
-                        if distance <= 20.0 {
+                    if distance <= particle2.range*particle2.range {
+                        if distance <= 20.0*20.0 {
                             if *force != 0.0 {
                                 central_force2 = (*force*2.0).abs();
                             } else {
@@ -111,22 +111,12 @@ fn game_loop (
                 None => {}
             }
 
-            particle1.total_force += (central_force1 / (distance*distance)) * direction;
-            particle2.total_force -= (central_force2 / (distance*distance)) * direction;
+            particle1.total_force += (central_force1 / (distance)) * direction;
+            particle2.total_force -= (central_force2 / (distance)) * direction;
         }
     }
 }
 
-
-fn position_update(mut query: Query<(&mut Particle, &mut Transform)>){
-    for (mut particle, mut translation) in query.iter_mut() {
-
-        particle.velocity = (particle.velocity + particle.total_force) * 0.9;
-
-        translation.translation += Vec3::new(particle.velocity.x, particle.velocity.y, 0.0);
-        particle.total_force = Vec2::ZERO;
-    }
-}
 
 fn movement_system_parallelisation(mut query: Query<(&mut Transform, &mut Particle)>) {
     query.par_iter_mut().for_each(|(mut transform, mut particle)| {
@@ -168,7 +158,7 @@ fn spawn_entities(
     println!("grey: {:?}", neutron);
 
 
-    for _ in 1..300 {
+    for _ in 1..50 {
         let range = -300.0..300.0;
 
         let random_vector1: Vec2 = Vec2::new(rng.random_range(range.clone()), rng.random_range(range.clone()));
