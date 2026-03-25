@@ -1,39 +1,39 @@
-use std::collections::HashMap;
-use bevy::color::palettes::basic::{BLUE, GREEN, RED};
+mod spawn;
+
+use bevy::ecs::world::CommandQueue;
 use bevy::prelude::*;
 use bevy::reflect::Array;
+use bevy::tasks::AsyncComputeTaskPool;
 use bevy::window::PrimaryWindow;
 use rand::Rng;
 use bevy_screen_diagnostics::{ScreenDiagnosticsPlugin, ScreenFrameDiagnosticsPlugin};
-
-const GREY: Srgba = Srgba::new(0.5, 0.5, 0.5, 1.0);
+use crate::spawn::spawn_entities;
 
 #[derive(Debug)]
-enum Attractions{
+pub enum Attractions{
     Blue(f32),
     Red(f32),
     Grey(f32)
 }
 #[derive(Component)]
-struct Particle {
+pub struct Particle {
     color: usize,
     attractions: [Attractions; 3],
     range: f32,
 }
 
 #[derive(Component, Default)]
-struct Position {
+pub struct Position {
     position: Vec2,
 }
 #[derive(Component, Default)]
-struct Velocity{
+pub struct Velocity{
     velocity: Vec2
 }
 #[derive(Component, Default)]
-struct TotalForce {
+pub struct TotalForce {
     total_force: Vec2,
 }
-
 
 struct Screen {
     width: f32,
@@ -51,9 +51,9 @@ fn main() {
         .add_systems(Startup, (spawn_camera, spawn_entities))
         .add_systems(Update,
                      (game_loop,
-                              border_system,
-                              movement_system_parallelisation,
-                              clear_terminal)
+                      border_system,
+                      movement_system_parallelization,
+                      clear_terminal)
         ).run();
 }
 
@@ -80,6 +80,22 @@ fn calculate_total_force (distance: f32, range: f32, force: f32) -> f32 {
         0.0
     }
 }
+/*
+fn get_central_force (force: &_, distance: f32, range: f32){
+    match force {
+        Attractions::Blue(force) => {
+            calculate_total_force(distance, range, *force)
+        },
+        Attractions::Grey(force) => {
+            calculate_total_force(distance, range, *force)
+        },
+        Attractions::Red(force) => {
+            calculate_total_force(distance, range, *force)
+        }
+    };
+}
+
+ */
 
 
 fn game_loop (
@@ -90,15 +106,17 @@ fn game_loop (
 
         let (particle1, position1, mut total_force1) = (particle1.0, particle1.1, particle1.2);
         let (particle2, position2, mut total_force2) = (particle2.0, particle2.1, particle2.2);
-        let delta:Vec2 = position1.position - position2.position;
+
+        let delta: Vec2 = position1.position - position2.position;
         let distance = delta.length_squared();
 
-        if distance <= 700.0*700.0 {
-
+        if distance <= 700.0 * 700.0 {
             let direction = delta.normalize();
 
             let force1 = &particle1.attractions[particle2.color];
             let force2 = &particle2.attractions[particle1.color];
+
+            //let central_force1 = get_central_force(force1, distance, particle1.range);
 
             let central_force1 = match force1 {
                 Attractions::Blue(force) => {
@@ -112,7 +130,7 @@ fn game_loop (
                 }
             };
 
-            let central_force2:f32 = match force2 {
+            let central_force2: f32 = match force2 {
                 Attractions::Blue(force) => {
                     calculate_total_force(distance, particle2.range, *force)
                 },
@@ -122,16 +140,18 @@ fn game_loop (
                 Attractions::Red(force) => {
                     calculate_total_force(distance, particle2.range, *force)
                 }
+
+
             };
 
-            total_force1.total_force += (central_force1 / (distance)) * direction;
-            total_force2.total_force -= (central_force2 / (distance)) * direction;
+            total_force1.total_force += (central_force1 / distance) * direction;
+            total_force2.total_force -= (central_force2 / distance) * direction;
         }
     }
 }
 
 
-fn movement_system_parallelisation(mut query: Query<(&mut Transform, &mut Position, &mut Velocity, &mut TotalForce)>) {
+fn movement_system_parallelization(mut query: Query<(&mut Transform, &mut Position, &mut Velocity, &mut TotalForce)>) {
     query.par_iter_mut().for_each(|(mut transform, mut position, mut velocity, mut total_force)| {
         //calculate change
         velocity.velocity = (velocity.velocity + total_force.total_force) * 0.9;
@@ -144,101 +164,6 @@ fn movement_system_parallelisation(mut query: Query<(&mut Transform, &mut Positi
         //reset
         total_force.total_force = Vec2::ZERO;
     });
-}
-
-fn spawn_entities(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-) {
-    let mut rng = rand::rng();
-
-    let repel = 10.0;
-    let neutral = 0.0;
-    let attract = -10.0;
-
-    for _ in 1..100 {
-        let range = -300.0..300.0;
-
-        let random_vector1: Vec2 = Vec2::new(rng.random_range(range.clone()), rng.random_range(range.clone()));
-        let random_vector2: Vec2 = Vec2::new(rng.random_range(range.clone()), rng.random_range(range.clone()));
-        let random_vector3: Vec2 = Vec2::new(rng.random_range(range.clone()), rng.random_range(range.clone()));
-
-        commands.spawn ((
-            Particle {
-                color: 0,
-                attractions: [
-                    Attractions::Blue(attract+60.0),
-                    Attractions::Red(attract),
-                    Attractions::Grey(attract-20.0)
-                ],
-                range: 700.0
-            },
-            Position {
-                position: random_vector1
-            },
-            Velocity {
-                velocity: Vec2::ZERO
-            },
-            TotalForce {
-                total_force: Vec2::ZERO
-            },
-            Mesh2d(meshes.add(Circle::default())),
-            MeshMaterial2d(materials.add(Color::from(BLUE))),
-            Transform::from_xyz(random_vector1.x, random_vector1.y, 0.0)
-                .with_scale(Vec3::splat(10.0)),
-        ));
-
-        commands.spawn ((
-            Particle {
-                color: 1,
-                attractions: [
-                    Attractions::Blue(attract-100.0),
-                    Attractions::Red(neutral),
-                    Attractions::Grey(attract-40.0),
-                ],
-                range: 40.0 //40.0
-            },
-            Position {
-                position: random_vector2
-            },
-            Velocity {
-                velocity: Vec2::ZERO
-            },
-            TotalForce {
-                total_force: Vec2::ZERO
-            },
-            Mesh2d(meshes.add(Circle::default())),
-            MeshMaterial2d(materials.add(Color::from(GREY))),
-            Transform::from_xyz(random_vector2.x, random_vector2.y, 0.0)
-                .with_scale(Vec3::splat(10.0)),
-        ));
-
-        commands.spawn ((
-            Particle {
-                color: 2,
-                attractions: [
-                    Attractions::Blue(attract-30.0),
-                    Attractions::Red(repel+15.0),
-                    Attractions::Grey(neutral)
-                ],
-                range: 700.0
-            },
-            Position {
-                position: random_vector3
-            },
-            Velocity {
-                velocity: Vec2::ZERO
-            },
-            TotalForce {
-                total_force: Vec2::ZERO
-            },
-            Mesh2d(meshes.add(Circle::default())),
-            MeshMaterial2d(materials.add(Color::from(RED))),
-            Transform::from_xyz(random_vector3.x, random_vector3.y, 0.0)
-                .with_scale(Vec3::splat(8.0)),
-        ));
-    }
 }
 
 fn border_system(
