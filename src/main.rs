@@ -158,7 +158,7 @@ fn spawn_entities(
     println!("grey: {:?}", neutron);
 
 
-    for _ in 1..50 {
+    for _ in 1..300 {
         let range = -300.0..300.0;
 
         let random_vector1: Vec2 = Vec2::new(rng.random_range(range.clone()), rng.random_range(range.clone()));
