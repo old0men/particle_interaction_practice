@@ -1,15 +1,8 @@
 mod spawn;
 
-use bevy::ecs::world::CommandQueue;
 use bevy::prelude::*;
-use bevy::reflect::Array;
-use bevy::render::render_resource::ShaderStage::Compute;
 use bevy::window::PrimaryWindow;
-use rand::Rng;
-use bevy_screen_diagnostics::{ScreenDiagnosticsPlugin, ScreenFrameDiagnosticsPlugin};
-use bevy::tasks::{AsyncComputeTaskPool, Task};
-use std::future::Future;
-use std::pin::Pin;
+use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, EntityCountDiagnosticsPlugin, LogDiagnosticsPlugin};use bevy::tasks::{AsyncComputeTaskPool, Task};
 use crate::spawn::spawn_entities;
 
 #[derive(Component)]
@@ -55,8 +48,9 @@ impl Screen {
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(ScreenDiagnosticsPlugin::default())
-        .add_plugins(ScreenFrameDiagnosticsPlugin)
+        .add_plugins(FrameTimeDiagnosticsPlugin::default())
+        .add_plugins(EntityCountDiagnosticsPlugin::default())
+        .add_plugins(LogDiagnosticsPlugin::default())
         .add_systems(Startup, (spawn_camera, spawn_entities))
         .add_systems(Update, (
              async_game_loop,
@@ -168,14 +162,14 @@ fn async_game_loop(
         let distance_sq = delta.length_squared();
 
         if distance_sq <= 700.0 * 700.0 && distance_sq > 0.0 {
-            let distance = distance_sq.sqrt();
-            let direction = delta / distance;
+
+            let direction = (delta*delta) / distance_sq;
 
             // Spawn async task for particle 1
             let particle1_clone = particle1.clone();
             let task1 = thread_pool.spawn(async move {
                 let force = &particle1_clone.attractions[particle2.color];
-                let central_force = get_central_force(force, distance, particle1_clone.range);
+                let central_force = get_central_force(force, distance_sq, particle1_clone.range);
                 (central_force / distance_sq) * direction  // Return the force vector
             });
             commands.entity(entity1).insert(ForceCalculationTask(task1));
@@ -184,7 +178,7 @@ fn async_game_loop(
             let particle2_clone = particle2.clone();
             let task2 = thread_pool.spawn(async move {
                 let force = &particle2_clone.attractions[particle1.color];
-                let central_force = get_central_force(force, distance, particle2_clone.range);
+                let central_force = get_central_force(force, distance_sq, particle2_clone.range);
                 -(central_force / distance_sq) * direction
             });
             commands.entity(entity2).insert(ForceCalculationTask(task2));
